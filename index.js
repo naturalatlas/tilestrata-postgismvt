@@ -1,6 +1,6 @@
 var pg = require('pg');
 var zlib = require('zlib');
-const SQL = require('sql-template-strings');
+var SQL = require('sql-template-strings');
 
 module.exports = function(options) {
 
@@ -53,32 +53,31 @@ module.exports = function(options) {
 		var resolution = (typeof lyr.resolution === 'function') ? lyr.resolution(server, tile) : lyr.resolution;
 		var mode = (typeof lyr.mode === 'function') ? lyr.mode(server, tile) : lyr.mode;
 
-		var filter = `ST_Intersects(TileBBox(${tile.z}, ${tile.x}, ${tile.y}, ${lyr.srid}), ${lyr.table}.${lyr.geometry})`;
+		var filter = "ST_Intersects(TileBBox(" + tile.z + ", " + tile.x + ", " + tile.y + ", " + lyr.srid + "), " + lyr.table + "." + lyr.geometry + ")";
 		var customFilter = null;
 		if (typeof lyr.filter === 'function') {
 			customFilter = lyr.filter(server, tile);
 		} else if (typeof lyr.filter === 'string') {
 			customFilter = lyr.filter;
 		}
-		if (customFilter) filter = `${filter} AND (${customFilter})`;
+		if (customFilter) filter = filter + " AND (" + customFilter + ")";
 
 		var query;
 		switch (mode) {
 
 			case "cluster":
 				var agg_q_name = 'mvt_geo';
-				query = `
-					SELECT ST_AsMVT('${tile.layer}', ${resolution}, 'geom', q) AS mvt FROM (
-						WITH ${agg_q_name} AS (
-							SELECT 1 cnt, ST_AsMVTGeom(ST_Transform(${lyr.table}.${lyr.geometry}, 3857), TileBBox(${tile.z}, ${tile.x}, ${tile.y}, 3857), ${resolution}, ${lyr.buffer}, ${clip_geom}) geom
-							FROM ${lyr.table}
-							WHERE ${filter}
-						)
-						SELECT COUNT(${agg_q_name}.cnt), ${agg_q_name}.geom
-						FROM ${agg_q_name}
-						GROUP BY ${agg_q_name}.geom
-					) AS q
-				`;
+				query =
+					"SELECT ST_AsMVT('" + tile.layer + "', " + resolution + ", 'geom', q) AS mvt FROM (" +
+						" WITH " + agg_q_name + " AS ( " +
+							" SELECT 1 cnt, ST_AsMVTGeom(ST_Transform(" + lyr.table + "." + lyr.geometry + ", 3857), TileBBox(" + tile.z + ", " + tile.x + ", " + tile.y + ", 3857), " + resolution + ", " + lyr.buffer + ", " + clip_geom + ") geom" +
+							" FROM " + lyr.table +
+							" WHERE " + filter +
+						")" +
+						" SELECT COUNT(" + agg_q_name + ".cnt), " + agg_q_name + ".geom" +
+						" FROM " + agg_q_name +
+						" GROUP BY " + agg_q_name + ".geom" +
+					") AS q";
 				break;
 
 			case "cluster_fields":
@@ -86,39 +85,37 @@ module.exports = function(options) {
 				var fieldsAgg = '';
 				if (lyr.fields) {
 					lyr.fields.split(' ').forEach(function(field) {
-						fieldsAgg += ', string_agg('+agg_q_name+'.' + field + '::text, \',\') AS ' + field;
+						fieldsAgg += ', string_agg(' + agg_q_name + '.' + field + '::text, \',\') AS ' + field;
 					});
 				}
-				query = `
-				SELECT ST_AsMVT('${tile.layer}', ${resolution}, 'geom', q) AS mvt FROM (
-					WITH ${agg_q_name} AS (
-						SELECT 1 cnt, ST_AsMVTGeom(ST_Transform(${lyr.table}.${lyr.geometry}, 3857), TileBBox(${tile.z}, ${tile.x}, ${tile.y}, 3857), ${resolution}, ${lyr.buffer}, ${clip_geom}) geom ${fields}
-						FROM ${lyr.table}
-						WHERE ${filter}
-					)
-					SELECT COUNT(${agg_q_name}.cnt), ${agg_q_name}.geom ${fieldsAgg}
-					FROM ${agg_q_name}
-					GROUP BY ${agg_q_name}.geom
-				) AS q
-				`;
+				query =
+				"SELECT ST_AsMVT('" + tile.layer + "', " + resolution + ", 'geom', q) AS mvt FROM (" +
+					" WITH " + agg_q_name + " AS (" +
+						" SELECT 1 cnt, ST_AsMVTGeom(ST_Transform(" + lyr.table + "." + lyr.geometry + ", 3857), TileBBox(" + tile.z + ", " + tile.x + ", " + tile.y + ", 3857), " + resolution + ", " + lyr.buffer + ", " + clip_geom + ") geom " + fields +
+						" FROM " + lyr.table +
+						" WHERE " + filter +
+					" )" +
+					" SELECT COUNT(" + agg_q_name + ".cnt), " + agg_q_name + ".geom " + fieldsAgg +
+					" FROM " + agg_q_name +
+					" GROUP BY " + agg_q_name + ".geom" +
+				" ) AS q";
 				break;
 
 			default:
-				query = `
-					SELECT ST_AsMVT('${tile.layer}', ${resolution}, 'geom', q) AS mvt FROM (
-                          WITH a AS (
-						SELECT ST_AsMVTGeom(
-                              ST_Transform(${lyr.table}.${lyr.geometry}, 3857),
-                              TileBBox(${tile.z}, ${tile.x}, ${tile.y}, 3857),
-                              ${resolution},
-                              ${lyr.buffer},
-                              ${clip_geom} ) geom ${fields}
-						FROM ${lyr.table}
-						WHERE ${filter}
-                          )
-                          SELECT * FROM a WHERE geom IS NOT NULL
-					) AS q
-				`;
+				query =
+					"SELECT ST_AsMVT('" + tile.layer + "', " + resolution + ", 'geom', q) AS mvt FROM (" +
+						" WITH a AS (" +
+						" SELECT ST_AsMVTGeom(" +
+                              " ST_Transform(" + lyr.table + "." + lyr.geometry + ", 3857)," +
+                              " TileBBox(" + tile.z + ", " + tile.x + ", " + tile.y + ", 3857)," +
+                              resolution + "," +
+                              lyr.buffer + "," +
+                              clip_geom + " ) geom " + fields +
+						" FROM " + lyr.table +
+						" WHERE " + filter +
+                          " )" +
+                          " SELECT * FROM a WHERE geom IS NOT NULL" +
+					" ) AS q";
 				break;
 		}
 
