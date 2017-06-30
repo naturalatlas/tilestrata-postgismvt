@@ -99,6 +99,33 @@ server.layer('mylayer').route('tile.mvt')
   );
 ```
 
+### Dynamic Filtering
+
+The *filter* option allows adding a condition to the query sent to PostGIS. The string returned from the custom filter function gets concatenated to the where clause so it is flexible, but *you should be very careful not to expose yourself to SQL injection*. If want the same filter for every request, the *filter* option can be string instead of a function.
+
+*Note: if you are caching the tiles with [tilestrata-disk](https://github.com/naturalatlas/tilestrata-disk) you will want to provide a custom path function that utilizes the query string.*
+
+```js
+const querystring = require('querystring');
+
+
+// ../mylayer/tile.mvt?id=19125
+server.layer('mylayer').route('tile.mvt')
+  .use(postgismvt({
+    lyr: {
+      filter: function(server, req) {
+        const qs = querystring.parse(req.qs);
+        const featureID = qs.id ? parseInt(qs.id, 10) : null;
+        if (featureID) return `id = ${featureID}`;
+      }
+    },
+    pgConfig: {
+      ...
+    }}))
+  );
+```
+
+
 ## Requirements
 
 - PostGIS 2.4.0

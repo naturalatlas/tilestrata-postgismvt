@@ -53,6 +53,15 @@ module.exports = function(options) {
 		var resolution = (typeof lyr.resolution === 'function') ? lyr.resolution(server, tile) : lyr.resolution;
 		var mode = (typeof lyr.mode === 'function') ? lyr.mode(server, tile) : lyr.mode;
 
+		var filter = `ST_Intersects(TileBBox(${tile.z}, ${tile.x}, ${tile.y}, ${lyr.srid}), ${lyr.table}.${lyr.geometry})`;
+		var customFilter = null;
+		if (typeof lyr.filter === 'function') {
+			customFilter = lyr.filter(server, tile);
+		} else if (typeof lyr.filter === 'string') {
+			customFilter = lyr.filter;
+		}
+		if (customFilter) filter = `${filter} AND (${customFilter})`;
+
 		var query;
 		switch (mode) {
 
@@ -63,7 +72,7 @@ module.exports = function(options) {
 						WITH ${agg_q_name} AS (
 							SELECT 1 cnt, ST_AsMVTGeom(ST_Transform(${lyr.table}.${lyr.geometry}, 3857), TileBBox(${tile.z}, ${tile.x}, ${tile.y}, 3857), ${resolution}, ${lyr.buffer}, ${clip_geom}) geom
 							FROM ${lyr.table}
-							WHERE ST_Intersects(TileBBox(${tile.z}, ${tile.x}, ${tile.y}, ${lyr.srid}), ${lyr.table}.${lyr.geometry})
+							WHERE ${filter}
 						)
 						SELECT COUNT(${agg_q_name}.cnt), ${agg_q_name}.geom
 						FROM ${agg_q_name}
@@ -85,7 +94,7 @@ module.exports = function(options) {
 					WITH ${agg_q_name} AS (
 						SELECT 1 cnt, ST_AsMVTGeom(ST_Transform(${lyr.table}.${lyr.geometry}, 3857), TileBBox(${tile.z}, ${tile.x}, ${tile.y}, 3857), ${resolution}, ${lyr.buffer}, ${clip_geom}) geom ${fields}
 						FROM ${lyr.table}
-						WHERE ST_Intersects(TileBBox(${tile.z}, ${tile.x}, ${tile.y}, ${lyr.srid}), ${lyr.table}.${lyr.geometry})
+						WHERE ${filter}
 					)
 					SELECT COUNT(${agg_q_name}.cnt), ${agg_q_name}.geom ${fieldsAgg}
 					FROM ${agg_q_name}
@@ -94,23 +103,23 @@ module.exports = function(options) {
 				`;
 				break;
 
-				default:
-					query = `
-						SELECT ST_AsMVT('${tile.layer}', ${resolution}, 'geom', q) AS mvt FROM (
-                            WITH a AS (
-							SELECT ST_AsMVTGeom(
-                                ST_Transform(${lyr.table}.${lyr.geometry}, 3857),
-                                TileBBox(${tile.z}, ${tile.x}, ${tile.y}, 3857),
-                                ${resolution},
-                                ${lyr.buffer},
-                                ${clip_geom} ) geom ${fields}
-							FROM ${lyr.table}
-							WHERE ST_Intersects(TileBBox(${tile.z}, ${tile.x}, ${tile.y}, ${lyr.srid}), ${lyr.table}.${lyr.geometry})
-                            )
-                            SELECT * FROM a WHERE geom IS NOT NULL
-						) AS q
-					`;
-					break;
+			default:
+				query = `
+					SELECT ST_AsMVT('${tile.layer}', ${resolution}, 'geom', q) AS mvt FROM (
+                          WITH a AS (
+						SELECT ST_AsMVTGeom(
+                              ST_Transform(${lyr.table}.${lyr.geometry}, 3857),
+                              TileBBox(${tile.z}, ${tile.x}, ${tile.y}, 3857),
+                              ${resolution},
+                              ${lyr.buffer},
+                              ${clip_geom} ) geom ${fields}
+						FROM ${lyr.table}
+						WHERE ${filter}
+                          )
+                          SELECT * FROM a WHERE geom IS NOT NULL
+					) AS q
+				`;
+				break;
 		}
 
 		pgPool.query(query, function(err, result) {
@@ -125,11 +134,11 @@ module.exports = function(options) {
 				err.statusCode = 204;
 				return callback(err);
 			}
-            zlib.gzip(result.rows[0].mvt, function(err, result) {
-                if (!err) {
-                    callback(null, result, {'Content-Type': 'application/x-protobuf', 'Content-Encoding': 'gzip'});
-                }
-            });
+			zlib.gzip(result.rows[0].mvt, function(err, result) {
+			    if (!err) {
+			        callback(null, result, {'Content-Type': 'application/x-protobuf', 'Content-Encoding': 'gzip'});
+			    }
+			});
 		});
 	}
 
